@@ -33,6 +33,15 @@ class TexasScheduler {
     }
 
     public async run() {
+        if (this.config.webhook.enable) {
+            try {
+                await this.sendWebhook("TX DPS Scheduler Starting at " + new Date());
+            } catch (e) {
+                log.error(`Failed to send initial webhook message.`);
+                process.exit(5);
+            }
+        }
+        process.exit(0);
         const existBooking = await this.checkExistBooking();
         if (existBooking.exist) {
             log.warn(`You have an existing booking at ${existBooking.response[0].SiteName} ${dayjs(existBooking.response[0].BookingDateTime).format('MM/DD/YYYY hh:mm A')}`);
@@ -235,15 +244,10 @@ class TexasScheduler {
 
     private async sendWebhook(message: string) {
         const requestBody: webhookPayload = {
-            chatGuid: `${this.config.webhook.phoneNumberType};-;${this.config.webhook.phoneNumber}`,
-            tempGuild: '',
-            message,
-            method: this.config.webhook.sendMethod,
-            subject: '',
-            effectId: '',
-            selectedMessageGuild: '',
+            "text": message,
+            "chat_id": this.config.webhook.chatId,
         };
-        const response = await undici.request(`${this.config.webhook.url}/api/v1/message/text?password=${this.config.webhook.password}`, {
+        const response = await undici.request(`https://api.telegram.org/bot${this.config.webhook.token}/sendMessage`, {
             method: 'POST',
             body: JSON.stringify(requestBody),
             headers: { 'Content-Type': 'application/json' },

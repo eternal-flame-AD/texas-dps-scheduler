@@ -64,9 +64,6 @@ interface appSettings {
 
 interface webhook {
     enable: boolean;
-    url: string;
-    password: string;
-    phoneNumber: string;
-    sendMethod: 'private-api' | 'apple-script';
-    phoneNumberType: 'iMessage' | 'SMS';
+    chatId: string;
+    token: string;
 }
