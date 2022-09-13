@@ -26,6 +26,7 @@ class TexasScheduler {
     private isBooked = false;
     private isHolded = false;
     private queue = new pQueue();
+    private existingBookingConfirmationNumber = "";
 
     public constructor() {
         // eslint-disable-next-line @typescript-eslint/no-var-requires, prettier/prettier
@@ -48,8 +49,8 @@ class TexasScheduler {
         if (existBooking.exist) {
             log.warn(`You have an existing booking at ${existBooking.response[0].SiteName} ${dayjs(existBooking.response[0].BookingDateTime).format('MM/DD/YYYY hh:mm A')}`);
             if (this.config.appSettings.cancelIfExist) {
-                log.info('Canceling existing booking....');
-                await this.cancelBooking(existBooking.response[0].ConfirmationNumber);
+                log.info('Booking will be cancelled when a new slot is found....');
+                this.existingBookingConfirmationNumber = existBooking.response[0].ConfirmationNumber;
             } else {
                 log.error('You have existing booking, please cancel it first');
                 process.exit(0);
@@ -159,7 +160,13 @@ class TexasScheduler {
         };
         const response: AvaliableLocationDatesResponse = await this.requestApi('/api/AvailableLocationDates', 'POST', requestBody).then(res => res.body.json());
         const avaliableDates = response.LocationAvailabilityDates.filter(
-            date => new Date(date.AvailabilityDate).valueOf() - new Date().valueOf() < ms(`${this.config.location.daysAround}d`) && date.AvailableTimeSlots.length > 0,
+            date => {
+                const msAway = new Date(date.AvailabilityDate).valueOf() - new Date().valueOf();
+
+                return msAway < ms(`${this.config.location.daysAround[1]}d`) &&
+                    msAway >= ms(`${this.config.location.daysAround[0]}d`) &&
+                    date.AvailableTimeSlots.length > 0
+            },
         );
         if (avaliableDates.length !== 0) {
             const booking = avaliableDates[0].AvailableTimeSlots[0];
@@ -168,8 +175,6 @@ class TexasScheduler {
             if (!this.config.appSettings.demoOnly)
                 this.holdSlot(booking, location);
         }
-        // of course ...
-        //log.info(`${location.Name} is not avaliable in around ${this.config.location.daysAround} days`);
         return Promise.resolve([location, response]);
     }
 
@@ -202,6 +207,9 @@ class TexasScheduler {
             process.exit(2);
         }
         if (this.isHolded) return;
+        if (this.existingBookingConfirmationNumber)
+            await this.cancelBooking(this.existingBookingConfirmationNumber);
+
         const requestBody: HoldSlotPayload = {
             DateOfBirth: this.config.personalInfo.dob,
             FirstName: this.config.personalInfo.firstName,

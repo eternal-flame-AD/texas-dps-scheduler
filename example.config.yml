@@ -23,8 +23,8 @@ location:
   preferredDays: 'Monday'
   # Put true/false without quotes if you want to book only same day appointment
   sameDay: false
-  # Put how many day from today you want to book (7 is a good number)
-  daysAround: 9
+  # At least 7 days, no more than 14 days away
+  daysAround: [7, 14]
 
 appSettings:
   # Put true/false without quotes if you want to cancel the appointment automatically if found existing appointment
