@@ -4,5 +4,12 @@ services:
   dps-scheduler:
     image: texas-dps-scheduler:latest
     container_name: texas-dps-scheduler
+    restart: on-failure
     volumes:
       - ./config.yml:/config.yml
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 10
+        window: 120s
