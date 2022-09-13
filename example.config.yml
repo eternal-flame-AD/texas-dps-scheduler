@@ -29,6 +29,8 @@ location:
 appSettings:
   # Put true/false without quotes if you want to cancel the appointment automatically if found existing appointment
   cancelIfExist: true
+  # No transactions (hold/schedule/cancel) will actually take place, for testing purposes
+  demoOnly: true
   # The time interval (in ms) the app will recheck for newer dates
   interval: 10000
   # Set this to true if you using replit, heroku or something equivalent

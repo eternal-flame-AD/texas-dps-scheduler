@@ -5,6 +5,8 @@ import sleep from 'timers/promises';
 import parseConfig from '../Config';
 import * as log from '../Log';
 import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+dayjs.extend(relativeTime);
 
 import type { HttpMethod } from 'undici/types/dispatcher';
 import type { EligibilityPayload } from '../Interfaces/Eligibility';
@@ -14,12 +16,13 @@ import type { HoldSlotPayload, HoldSlotResponse } from '../Interfaces/HoldSlot';
 import type { BookSlotPayload, BookSlotResponse } from '../Interfaces/BookSlot';
 import type { ExistBookingPayload, ExistBookingResponse } from '../Interfaces/ExistBooking';
 import type { CancelBookingPayload } from '../Interfaces/CancelBooking';
-import type { webhookPayload } from '../Interfaces/webhook';
+import type { webhookPayload, webhookMessage, webhookResponse } from '../Interfaces/webhook';
 
 class TexasScheduler {
     public requestInstance = new undici.Pool('https://publicapi.txdpsscheduler.com');
     public config = parseConfig();
     private avaliableLocation: AvaliableLocationResponse[] | null = null;
+    private webhookStatusMessageId = -1;
     private isBooked = false;
     private isHolded = false;
     private queue = new pQueue();
@@ -35,13 +38,12 @@ class TexasScheduler {
     public async run() {
         if (this.config.webhook.enable) {
             try {
-                await this.sendWebhook("TX DPS Scheduler Starting at " + new Date());
+                await this.sendWebhook("TX DPS Scheduler Starting at " + new Date(), false);
             } catch (e) {
                 log.error(`Failed to send initial webhook message.`);
                 process.exit(5);
             }
         }
-        process.exit(0);
         const existBooking = await this.checkExistBooking();
         if (existBooking.exist) {
             log.warn(`You have an existing booking at ${existBooking.response[0].SiteName} ${dayjs(existBooking.response[0].BookingDateTime).format('MM/DD/YYYY hh:mm A')}`);
@@ -72,6 +74,10 @@ class TexasScheduler {
     }
 
     private async cancelBooking(ConfirmationNumber: string) {
+        if (this.config.appSettings.demoOnly) {
+            log.error("Refusing to cancel booking in demo mode");
+            process.exit(2);
+        }
         const requestBody: CancelBookingPayload = {
             ConfirmationNumber,
             DateOfBirth: this.config.personalInfo.dob,
@@ -120,14 +126,30 @@ class TexasScheduler {
         log.info('Checking Avaliable Location Dates....');
         if (!this.avaliableLocation) return;
         const getLocationFunctions = this.avaliableLocation.map(location => () => this.getLocationDates(location));
-        for (; ;) {
+
+        let bestSoFar: [string, Date, Date] = ["", new Date(), new Date()];
+        for (let count = 0; ; count++) {
             console.log('--------------------------------------------------------------------------------');
-            await this.queue.addAll(getLocationFunctions).catch(() => null);
+            let message = `# TXDPS Refresh #${count}\n\n` +
+                "Time: " + new Date() + "\n\n";
+            await this.queue.addAll(getLocationFunctions).then((resp) => {
+                for (const [location, response] of resp) {
+                    message += `>${location.Name}:` + response.LocationAvailabilityDates.slice(0, 3).reduce((p, c, i) =>
+                        p + `\n\t #${i + 1} - ${dayjs(c.AvailabilityDate).format('MM/DD/YYYY')}`
+                        , "") + "\n";
+
+                    if (!bestSoFar[0] || new Date(location.NextAvailableDate) < bestSoFar[1])
+                        bestSoFar = [location.Name, new Date(location.NextAvailableDate), new Date()];
+                }
+            }).catch(() => null);
+
+            message += `\n\nBest so far: ${bestSoFar[0]} at ${dayjs(bestSoFar[1]).format('MM/DD/YYYY')} ${dayjs().fromNow()}`;
+            await this.sendWebhook(message, false);
             await sleep.setTimeout(this.config.appSettings.interval + Math.random() * 0.4 - 0.2);
         }
     }
 
-    private async getLocationDates(location: AvaliableLocationResponse) {
+    private async getLocationDates(location: AvaliableLocationResponse): Promise<[AvaliableLocationResponse, AvaliableLocationDatesResponse]> {
         const requestBody: AvaliableLocationDatesPayload = {
             LocationId: location.Id,
             PreferredDay: this.config.location.preferredDays,
@@ -143,11 +165,12 @@ class TexasScheduler {
             const booking = avaliableDates[0].AvailableTimeSlots[0];
             log.info(`${location.Name} is avaliable on ${booking.FormattedStartDateTime}`);
             if (!this.queue.isPaused) this.queue.pause();
-            this.holdSlot(booking, location);
-            return Promise.resolve(true);
+            if (!this.config.appSettings.demoOnly)
+                this.holdSlot(booking, location);
         }
-        log.info(`${location.Name} is not avaliable in around ${this.config.location.daysAround} days`);
-        return Promise.reject();
+        // of course ...
+        //log.info(`${location.Name} is not avaliable in around ${this.config.location.daysAround} days`);
+        return Promise.resolve([location, response]);
     }
 
     private async requestApi(path: string, method: HttpMethod, body: object) {
@@ -174,6 +197,10 @@ class TexasScheduler {
     }
 
     private async holdSlot(booking: AvaliableTimeSlots, location: AvaliableLocationResponse) {
+        if (this.config.appSettings.demoOnly) {
+            log.error("Refusing to hold booking in demo mode");
+            process.exit(2);
+        }
         if (this.isHolded) return;
         const requestBody: HoldSlotPayload = {
             DateOfBirth: this.config.personalInfo.dob,
@@ -194,6 +221,10 @@ class TexasScheduler {
     }
 
     private async bookSlot(booking: AvaliableTimeSlots, location: AvaliableLocationResponse) {
+        if (this.config.appSettings.demoOnly) {
+            log.error("Refusing to make booking in demo mode");
+            process.exit(2);
+        }
         if (this.isBooked) return;
         log.info('Booking slot....');
         const requestBody: BookSlotPayload = {
@@ -232,7 +263,10 @@ class TexasScheduler {
                         `Location: ${location.Name} DPS`,
                         `Time: ${booking.FormattedStartDateTime}`,
                         `Appointment URL: ${appointmentURL}`,
+                        "",
+                        "Scheduler will now Exit."
                     ].join('\n'),
+                    true
                 );
             process.exit(0);
         } else {
@@ -242,21 +276,42 @@ class TexasScheduler {
         }
     }
 
-    private async sendWebhook(message: string) {
+    private async sendWebhook(message: string, important: boolean): Promise<webhookMessage | null> {
+        const sendNewMessage = important || this.webhookStatusMessageId < 0;
         const requestBody: webhookPayload = {
             "text": message,
             "chat_id": this.config.webhook.chatId,
         };
-        const response = await undici.request(`https://api.telegram.org/bot${this.config.webhook.token}/sendMessage`, {
+        if (!sendNewMessage)
+            requestBody.message_id = this.webhookStatusMessageId;
+        if (sendNewMessage && !important)
+            requestBody.disable_notification = true;
+
+        const response = await undici.request(`https://api.telegram.org/bot${this.config.webhook.token}/${sendNewMessage ? "sendMessage" : "editMessageText"}`, {
             method: 'POST',
             body: JSON.stringify(requestBody),
             headers: { 'Content-Type': 'application/json' },
         });
-        if (response.statusCode === 200) log.info('[INFO] Webhook sent successfully');
-        else {
-            log.error('Failed to send webhook');
-            log.error(await response.body.text());
+
+        const resp: webhookResponse<webhookMessage> = await response.body.json();
+        if (resp.ok) {
+            log.info('[INFO] Webhook sent successfully');
+            if (!important && sendNewMessage) {
+                // if we just sent a non important message use it for future updates
+                this.webhookStatusMessageId = resp.result.message_id;
+                log.info("Setting status message id:" + this.webhookStatusMessageId);
+            }
+            return resp.result;
         }
+        log.error(`Failed to ${sendNewMessage ? "send webhook" : "edit status message"}: ${resp.description}`);
+        if (!sendNewMessage) {
+            // if we failed to edit a message, try sending a new one
+            this.webhookStatusMessageId = -2;
+            return this.sendWebhook(message, important);
+        }
+        return null;
+
+
     }
 }
 

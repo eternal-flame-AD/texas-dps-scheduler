@@ -57,6 +57,7 @@ interface location {
 
 interface appSettings {
     cancelIfExist: boolean;
+    demoOnly: boolean;
     interval: number;
     webserver: boolean;
     headersTimeout: number;
