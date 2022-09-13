@@ -1,21 +1,16 @@
-FROM node:alpine as ts-compiler
+FROM node:18 as ts-compiler
 WORKDIR /home/container
 
 COPY . .
 
-RUN yarn install
-RUN yarn run build
+RUN npm i --dev && npm run build
 
-FROM node:alpine as ts-remover
-WORKDIR /home/container
+FROM node:18
 
 COPY --from=ts-compiler /home/container/package.json ./
 COPY --from=ts-compiler /home/container/dist ./
 
-RUN yarn install --production
+RUN npm i
 
-FROM node:slim
-WORKDIR /home/container
-COPY --from=ts-remover /home/container ./
 USER 1000
 CMD ["node", "index.js"]
