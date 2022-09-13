@@ -111,10 +111,10 @@ class TexasScheduler {
         log.info('Checking Avaliable Location Dates....');
         if (!this.avaliableLocation) return;
         const getLocationFunctions = this.avaliableLocation.map(location => () => this.getLocationDates(location));
-        for (;;) {
+        for (; ;) {
             console.log('--------------------------------------------------------------------------------');
             await this.queue.addAll(getLocationFunctions).catch(() => null);
-            await sleep.setTimeout(this.config.appSettings.interval);
+            await sleep.setTimeout(this.config.appSettings.interval + Math.random() * 0.4 - 0.2);
         }
     }
 
@@ -149,6 +149,14 @@ class TexasScheduler {
                 'Content-Type': 'application/json;charset=UTF-8',
                 Origin: 'https://public.txdpsscheduler.com',
                 Referer: 'https://public.txdpsscheduler.com/',
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:104.0) Gecko/20100101 Firefox/104.0",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "Pragma": "no-cache",
+                "Cache-Control": "no-cache",
             },
             headersTimeout: this.config.appSettings.headersTimeout,
             body: JSON.stringify(body),
