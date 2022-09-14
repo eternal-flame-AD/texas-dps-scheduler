@@ -7,6 +7,8 @@ services:
     restart: on-failure
     volumes:
       - ./config.yml:/config.yml
+    environment:
+      - TZ=America/Chicago
     deploy:
       restart_policy:
         condition: on-failure
