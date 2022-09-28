@@ -23,8 +23,10 @@ location:
   preferredDays: 'Monday'
   # Put true/false without quotes if you want to book only same day appointment
   sameDay: false
-  # At least 7 days, no more than 14 days away
-  daysAround: [7, 14]
+  # Take earliest appointment in any of these time slots
+  timeSlots: 
+    - ["1999-01-01 00:00", "1999-01-02 23:59"]
+    - ["2000-01-01 00:00", "2099-12-31 23:59"]
 
 appSettings:
   # Put true/false without quotes if you want to cancel the appointment automatically if found existing appointment
@@ -38,9 +40,11 @@ appSettings:
   # Set this to higher if you encounter Header Timeout error. This one is in miliseconds
   headersTimeout: 20000 
 
-# If you dont know what to change here, dont change it :)
+# Telegram bot for updates
 webhook:
   # If your using Telegram webhook/api put this to true otherwise, keep it false
   enable: false
+  # telegram bot chatid
   chatId: ""
+  # telegram bot token
   token: ""

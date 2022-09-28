@@ -52,7 +52,7 @@ interface location {
     miles: number;
     preferredDays: number;
     sameDay: boolean;
-    daysAround: [number, number];
+    timeSlots: [string, string][];
 }
 
 interface appSettings {

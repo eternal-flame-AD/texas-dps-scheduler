@@ -1,10 +1,9 @@
 import undici from 'undici';
-import ms from 'ms';
 import pQueue from 'p-queue';
 import sleep from 'timers/promises';
 import parseConfig from '../Config';
 import * as log from '../Log';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 dayjs.extend(relativeTime);
 
@@ -17,6 +16,14 @@ import type { BookSlotPayload, BookSlotResponse } from '../Interfaces/BookSlot';
 import type { ExistBookingPayload, ExistBookingResponse } from '../Interfaces/ExistBooking';
 import type { CancelBookingPayload } from '../Interfaces/CancelBooking';
 import type { webhookPayload, webhookMessage, webhookResponse } from '../Interfaces/webhook';
+
+
+function isTimeBetween(date: string | Dayjs, start: string | Dayjs, end: string | Dayjs): boolean {
+    [date, start, end] = [dayjs(date), dayjs(start), dayjs(end)];
+    const ret = date.add(1, "ms").isAfter(start) && date.subtract(1, "ms").isBefore(end);
+    //console.log([date, start, end], ret);
+    return ret;
+}
 
 class TexasScheduler {
     public requestInstance = new undici.Pool('https://publicapi.txdpsscheduler.com');
@@ -128,7 +135,7 @@ class TexasScheduler {
         if (!this.avaliableLocation) return;
         const getLocationFunctions = this.avaliableLocation.map(location => () => this.getLocationDates(location));
 
-        let bestSoFar: [string, Date, Date] = ["", new Date(), new Date()];
+        let bestSoFar: [string, Dayjs, Dayjs] = ["", dayjs(0), dayjs(0)];
         for (let count = 0; ; count++) {
             console.log('--------------------------------------------------------------------------------');
             let message = `# TXDPS Refresh #${count}\n\n` +
@@ -139,12 +146,13 @@ class TexasScheduler {
                         p + `\n\t #${i + 1} - ${dayjs(c.AvailabilityDate).format('MM/DD/YYYY')}`
                         , "") + "\n";
 
-                    if (!bestSoFar[0] || new Date(location.NextAvailableDate) < bestSoFar[1])
-                        bestSoFar = [location.Name, new Date(location.NextAvailableDate), new Date()];
+                    if (bestSoFar[1].isBefore(dayjs()) || dayjs(location.NextAvailableDate).isBefore(bestSoFar[1]))
+                        bestSoFar = [location.Name, dayjs(location.NextAvailableDate), dayjs()];
                 }
             }).catch(() => null);
 
-            message += `\n\nBest so far: ${bestSoFar[0]} at ${dayjs(bestSoFar[1]).format('MM/DD/YYYY')} ${dayjs().fromNow()}`;
+            message += `\n\nBest so far: ${dayjs(bestSoFar[1]).format('MM/DD/YYYY')} at ${bestSoFar[0]} ${bestSoFar[2].fromNow()}`;
+            log.info(message)
             await this.sendWebhook(message, false);
             await sleep.setTimeout(this.config.appSettings.interval + Math.random() * 0.4 - 0.2);
         }
@@ -159,21 +167,16 @@ class TexasScheduler {
             TypeId: this.config.personalInfo.typeId || 71,
         };
         const response: AvaliableLocationDatesResponse = await this.requestApi('/api/AvailableLocationDates', 'POST', requestBody).then(res => res.body.json());
-        const avaliableDates = response.LocationAvailabilityDates.filter(
-            date => {
-                const msAway = new Date(date.AvailabilityDate).valueOf() - new Date().valueOf();
 
-                return msAway < ms(`${this.config.location.daysAround[1]}d`) &&
-                    msAway >= ms(`${this.config.location.daysAround[0]}d`) &&
-                    date.AvailableTimeSlots.length > 0
-            },
-        );
-        if (avaliableDates.length !== 0) {
-            const booking = avaliableDates[0].AvailableTimeSlots[0];
-            log.info(`${location.Name} is avaliable on ${booking.FormattedStartDateTime}`);
-            if (!this.queue.isPaused) this.queue.pause();
-            if (!this.config.appSettings.demoOnly)
-                this.holdSlot(booking, location);
+        for (const date of response.LocationAvailabilityDates) {
+            for (const booking of date.AvailableTimeSlots) {
+                if (this.config.location.timeSlots.filter(slot => isTimeBetween(booking.StartDateTime, slot[0], slot[1])).length !== 0) {
+                    log.info(`${location.Name} is avaliable on ${booking.FormattedStartDateTime}`);
+                    if (!this.queue.isPaused) this.queue.pause();
+                    if (!this.config.appSettings.demoOnly)
+                        this.holdSlot(booking, location);
+                }
+            }
         }
         return Promise.resolve([location, response]);
     }
